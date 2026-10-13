@@ -130,11 +130,11 @@ def decode_text(data: bytes) -> tuple[str | None, str | None]:
     return None, "無法以 UTF-8 / cp950 解碼"
 
 
-def _scan_line(line: str, lineno: int, path: str, cfg: Config, kw_lower: list[str],
-               kw_on: bool) -> list[Finding]:
+def _scan_line(line: str, lineno: int, path: str, enabled: frozenset[str],
+               kw_lower: tuple[str, ...]) -> list[Finding]:
     out: list[Finding] = []
 
-    if cfg.rule_enabled("R4"):
+    if "R4" in enabled:
         for sp in R.SECRET_PATTERNS:
             for m in sp.regex.finditer(line):
                 val = m.group(sp.group)
@@ -142,19 +142,19 @@ def _scan_line(line: str, lineno: int, path: str, cfg: Config, kw_lower: list[st
                     continue
                 out.append(Finding("R4", R.BLOCK, path, f"疑似{sp.label}", lineno, mask_secret(val)))
 
-    if cfg.rule_enabled("R5-ID"):
+    if "R5-ID" in enabled:
         for m in R.TW_ID_REGEX.finditer(line):
             if R.tw_id_valid(m.group()):
                 out.append(Finding("R5-ID", R.BLOCK, path, "疑似台灣身分證字號（檢查碼正確）",
                                    lineno, mask_tw_id(m.group())))
-    if cfg.rule_enabled("R5-PHONE"):
+    if "R5-PHONE" in enabled:
         for m in R.TW_PHONE_REGEX.finditer(line):
             out.append(Finding("R5-PHONE", R.WARN, path, "疑似台灣手機號碼", lineno, mask_secret(m.group())))
-    if cfg.rule_enabled("R5-EMAIL"):
+    if "R5-EMAIL" in enabled:
         for m in R.EMAIL_REGEX.finditer(line):
             out.append(Finding("R5-EMAIL", R.WARN, path, "Email 位址", lineno, mask_email(m.group())))
 
-    if kw_on:
+    if "R6" in enabled:
         low = line.lower()
         for n, kw in enumerate(kw_lower, 1):
             if kw in low:
@@ -163,12 +163,16 @@ def _scan_line(line: str, lineno: int, path: str, cfg: Config, kw_lower: list[st
     return out
 
 
-def scan_text(path: str, text: str, cfg: Config) -> list[Finding]:
-    kw_on = cfg.rule_enabled("R6") and bool(cfg.keywords)
-    kw_lower = [k.lower() for k in cfg.keywords]
+def scan_text(path: str, text: str, cfg: Config,
+              *, keyword_lowers: tuple[str, ...] | None = None) -> list[Finding]:
+    enabled = frozenset(
+        rid for rid in ("R4", "R5-ID", "R5-PHONE", "R5-EMAIL", "R6")
+        if cfg.rule_enabled(rid) and (rid != "R6" or cfg.keywords)
+    )
+    kw_lower = keyword_lowers if keyword_lowers is not None else tuple(k.lower() for k in cfg.keywords)
     out: list[Finding] = []
     for i, line in enumerate(text.split("\n"), 1):
-        out.extend(_scan_line(line, i, path, cfg, kw_lower, kw_on))
+        out.extend(_scan_line(line, i, path, enabled, kw_lower))
 
     # R6-CFG：repo 內的關鍵字設定檔
     parts = path.split("/")
@@ -184,6 +188,7 @@ def scan_text(path: str, text: str, cfg: Config) -> list[Finding]:
 # --- 主流程 -----------------------------------------------------------------
 
 def scan_entries(entries: list[Entry], cfg: Config, result: ScanResult, *, names_only: bool = False) -> ScanResult:
+    keyword_lowers = tuple(k.lower() for k in cfg.keywords)
     for e in entries:
         result.scanned += 1
         raw: list[Finding] = []
@@ -207,7 +212,7 @@ def scan_entries(entries: list[Entry], cfg: Config, result: ScanResult, *, names
                     if text is None:
                         result.skipped.append((e.path, why or "無法解碼"))
                     else:
-                        raw.extend(scan_text(e.path, text, cfg))
+                        raw.extend(scan_text(e.path, text, cfg, keyword_lowers=keyword_lowers))
 
         per_rule: Counter = Counter()
         seen: set[tuple] = set()

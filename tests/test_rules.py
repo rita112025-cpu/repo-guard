@@ -9,7 +9,7 @@ import random
 
 import pytest
 
-from repo_guard.config import Config, glob_match
+from repo_guard.config import AllowEntry, Config, glob_match
 from repo_guard.rules import _TW_LETTER_CODE, tw_id_valid
 from repo_guard.scanners import check_name, check_size, decode_text, mask_secret, mask_tw_id, scan_text
 
@@ -35,6 +35,17 @@ def cfg(**kw) -> Config:
     for k, v in kw.items():
         setattr(c, k, v)
     return c
+
+
+def test_allowlist_glob_is_compiled_once(monkeypatch):
+    entry = AllowEntry("docs/*.csv", "R1", "公開範例", "repo")
+
+    def fail_if_recompiled(_pattern):
+        raise AssertionError("glob 不應在每次 finding 比對時重新編譯")
+
+    monkeypatch.setattr("repo_guard.config.glob_to_regex", fail_if_recompiled)
+    assert entry.covers("docs/sample.csv", "R1")
+    assert not entry.covers("private/sample.csv", "R1")
 
 
 # --- R1 ---

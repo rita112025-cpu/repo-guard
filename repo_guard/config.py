@@ -32,9 +32,14 @@ class AllowEntry:
     rule: str
     reason: str
     source: str  # 來源設定檔（顯示用）
+    _path_regex: re.Pattern[str] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        # allowlist 會對每個 finding 比對；在載入設定時編譯一次即可。
+        object.__setattr__(self, "_path_regex", glob_to_regex(self.path))
 
     def covers(self, path: str, rule: str) -> bool:
-        return rule_matches(self.rule, rule) and glob_match(self.path, path)
+        return rule_matches(self.rule, rule) and self._path_regex.fullmatch(path) is not None
 
 
 @dataclass
